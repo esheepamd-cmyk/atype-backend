@@ -18,10 +18,11 @@ function loadDb() {
     if (!parsed.users) parsed.users = [];
     if (!parsed.posts) parsed.posts = [];
     if (!parsed.messages) parsed.messages = [];
-    // новое поле friends для старых аккаунтов
+    // дополняем старые аккаунты новыми полями
     parsed.users = parsed.users.map(u => ({
       ...u,
-      friends: Array.isArray(u.friends) ? u.friends : []
+      friends: Array.isArray(u.friends) ? u.friends : [],
+      avatar: typeof u.avatar === 'string' ? u.avatar : ''
     }));
     return parsed;
   } catch {
@@ -61,7 +62,8 @@ app.post('/api/register', (req, res) => {
     passHash: simpleHash(password),
     createdAt: new Date().toISOString(),
     lastLoginAt: null,
-    friends: []
+    friends: [],
+    avatar: ''
   };
   db.users.push(user);
   saveDb(db);
@@ -84,7 +86,23 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true, login });
 });
 
-// посты
+// обновить аватар (url картинки)
+app.post('/api/avatar', (req, res) => {
+  const { login, avatar } = req.body;
+  if (!login) {
+    return res.status(400).json({ error: 'login required' });
+  }
+  const db = loadDb();
+  const user = db.users.find(u => u.login === login);
+  if (!user) {
+    return res.status(400).json({ error: 'unknown user' });
+  }
+  user.avatar = typeof avatar === 'string' ? avatar.trim() : '';
+  saveDb(db);
+  res.json({ ok: true });
+});
+
+// посты пользователя
 app.get('/api/posts', (req, res) => {
   const author = req.query.author;
   const db = loadDb();
@@ -114,6 +132,15 @@ app.post('/api/posts', (req, res) => {
   db.posts.push(post);
   saveDb(db);
   res.json({ ok: true, post });
+});
+
+// общая лента (все посты)
+app.get('/api/feed', (req, res) => {
+  const db = loadDb();
+  const sorted = (db.posts || [])
+    .slice()
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
+  res.json(sorted);
 });
 
 // друзья: получить список
