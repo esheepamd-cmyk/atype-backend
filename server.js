@@ -102,7 +102,24 @@ app.post('/api/avatar', (req, res) => {
   res.json({ ok: true });
 });
 
-// посты пользователя
+// онлайн-статус по lastLoginAt
+app.get('/api/online', (req, res) => {
+  const login = req.query.login;
+  if (!login) return res.status(400).json({ error: 'login required' });
+
+  const db = loadDb();
+  const user = db.users.find(u => u.login === login);
+  if (!user) return res.status(404).json({ error: 'user not found' });
+
+  const last = user.lastLoginAt ? new Date(user.lastLoginAt).getTime() : 0;
+  const now = Date.now();
+  const fiveMin = 5 * 60 * 1000;
+  const online = last && (now - last) < fiveMin;
+
+  res.json({ login, online, lastLoginAt: user.lastLoginAt });
+});
+
+// посты пользователя (старый эндпоинт, для совместимости)
 app.get('/api/posts', (req, res) => {
   const author = req.query.author;
   const db = loadDb();
@@ -113,6 +130,7 @@ app.get('/api/posts', (req, res) => {
   res.json(posts);
 });
 
+// создать пост
 app.post('/api/posts', (req, res) => {
   const { author, text } = req.body;
   if (!author || !text) {
@@ -132,6 +150,30 @@ app.post('/api/posts', (req, res) => {
   db.posts.push(post);
   saveDb(db);
   res.json({ ok: true, post });
+});
+
+// удалить пост по id (только автор)
+app.delete('/api/posts/:id', (req, res) => {
+  const id = req.params.id;
+  const author = req.query.author;
+
+  if (!id || !author) {
+    return res.status(400).json({ error: 'id and author required' });
+  }
+
+  const db = loadDb();
+  const idx = db.posts.findIndex(p => p.id === id);
+
+  if (idx === -1) {
+    return res.status(404).json({ error: 'post not found' });
+  }
+  if (db.posts[idx].author !== author) {
+    return res.status(403).json({ error: 'not your post' });
+  }
+
+  db.posts.splice(idx, 1);
+  saveDb(db);
+  res.json({ ok: true });
 });
 
 // общая лента (все посты)
