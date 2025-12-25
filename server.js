@@ -15,10 +15,14 @@ function loadDb() {
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    // защита, если старый формат без messages
     if (!parsed.users) parsed.users = [];
     if (!parsed.posts) parsed.posts = [];
     if (!parsed.messages) parsed.messages = [];
+    // новое поле friends для старых аккаунтов
+    parsed.users = parsed.users.map(u => ({
+      ...u,
+      friends: Array.isArray(u.friends) ? u.friends : []
+    }));
     return parsed;
   } catch {
     return { users: [], posts: [], messages: [] };
@@ -56,7 +60,8 @@ app.post('/api/register', (req, res) => {
     login,
     passHash: simpleHash(password),
     createdAt: new Date().toISOString(),
-    lastLoginAt: null
+    lastLoginAt: null,
+    friends: []
   };
   db.users.push(user);
   saveDb(db);
@@ -79,7 +84,7 @@ app.post('/api/login', (req, res) => {
   res.json({ ok: true, login });
 });
 
-// получить посты (все или по author)
+// посты
 app.get('/api/posts', (req, res) => {
   const author = req.query.author;
   const db = loadDb();
@@ -90,7 +95,6 @@ app.get('/api/posts', (req, res) => {
   res.json(posts);
 });
 
-// создать пост
 app.post('/api/posts', (req, res) => {
   const { author, text } = req.body;
   if (!author || !text) {
@@ -112,7 +116,48 @@ app.post('/api/posts', (req, res) => {
   res.json({ ok: true, post });
 });
 
-// получить список собеседников для пользователя (по сообщениям)
+// друзья: получить список
+app.get('/api/friends', (req, res) => {
+  const userLogin = req.query.user;
+  if (!userLogin) {
+    return res.status(400).json({ error: 'user required' });
+  }
+  const db = loadDb();
+  const user = db.users.find(u => u.login === userLogin);
+  if (!user) {
+    return res.status(400).json({ error: 'unknown user' });
+  }
+  res.json(user.friends || []);
+});
+
+// друзья: добавить (двусторонняя дружба)
+app.post('/api/friends/add', (req, res) => {
+  const { user, friend } = req.body;
+  if (!user || !friend) {
+    return res.status(400).json({ error: 'user and friend required' });
+  }
+  if (user === friend) {
+    return res.status(400).json({ error: 'cannot add yourself' });
+  }
+
+  const db = loadDb();
+  const u = db.users.find(x => x.login === user);
+  const f = db.users.find(x => x.login === friend);
+  if (!u || !f) {
+    return res.status(400).json({ error: 'unknown user or friend' });
+  }
+
+  if (!Array.isArray(u.friends)) u.friends = [];
+  if (!Array.isArray(f.friends)) f.friends = [];
+
+  if (!u.friends.includes(friend)) u.friends.push(friend);
+  if (!f.friends.includes(user)) f.friends.push(user);
+
+  saveDb(db);
+  res.json({ ok: true, friends: u.friends });
+});
+
+// диалоги (список собеседников по сообщениям)
 app.get('/api/dialogs', (req, res) => {
   const user = req.query.user;
   if (!user) {
@@ -127,7 +172,7 @@ app.get('/api/dialogs', (req, res) => {
   res.json(Array.from(partners));
 });
 
-// получить сообщения между двумя пользователями
+// сообщения: получить историю между двумя
 app.get('/api/messages', (req, res) => {
   const user = req.query.user;
   const withUser = req.query.with;
@@ -144,7 +189,7 @@ app.get('/api/messages', (req, res) => {
   res.json(msgs);
 });
 
-// отправить сообщение
+// сообщения: отправить
 app.post('/api/messages', (req, res) => {
   const { from, to, text } = req.body;
   if (!from || !to || !text) {
