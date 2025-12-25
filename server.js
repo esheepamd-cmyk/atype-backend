@@ -18,12 +18,20 @@ function loadDb() {
     if (!parsed.users) parsed.users = [];
     if (!parsed.posts) parsed.posts = [];
     if (!parsed.messages) parsed.messages = [];
+
     // дополняем старые аккаунты новыми полями
     parsed.users = parsed.users.map(u => ({
       ...u,
       friends: Array.isArray(u.friends) ? u.friends : [],
-      avatar: typeof u.avatar === 'string' ? u.avatar : ''
+      avatar: typeof u.avatar === 'string' ? u.avatar : '',
+      role: u.role || 'user',         // user | admin
+      mutedUntil: u.mutedUntil || null,
+      lastPostAt: u.lastPostAt || null
     }));
+
+    // гарантируем, что testa acc — админ
+    ensureAdmin(parsed);
+
     return parsed;
   } catch {
     return { users: [], posts: [], messages: [] };
@@ -38,6 +46,17 @@ function simpleHash(str) {
   let h = 0;
   for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
   return h.toString();
+}
+
+function ensureAdmin(db) {
+  const adminLogin = 'testa acc';
+  const u = db.users.find(x => x.login === adminLogin);
+  if (u) u.role = 'admin';
+}
+
+function isAdmin(db, login) {
+  const u = db.users.find(x => x.login === login);
+  return !!u && u.role === 'admin';
 }
 
 app.use(cors());
@@ -62,8 +81,11 @@ app.post('/api/register', (req, res) => {
     passHash: simpleHash(password),
     createdAt: new Date().toISOString(),
     lastLoginAt: null,
+    lastPostAt: null,
     friends: [],
-    avatar: ''
+    avatar: '',
+    role: 'user',
+    mutedUntil: null
   };
   db.users.push(user);
   saveDb(db);
@@ -102,186 +124,4 @@ app.post('/api/avatar', (req, res) => {
   res.json({ ok: true });
 });
 
-// онлайн-статус по lastLoginAt
-app.get('/api/online', (req, res) => {
-  const login = req.query.login;
-  if (!login) return res.status(400).json({ error: 'login required' });
-
-  const db = loadDb();
-  const user = db.users.find(u => u.login === login);
-  if (!user) return res.status(404).json({ error: 'user not found' });
-
-  const last = user.lastLoginAt ? new Date(user.lastLoginAt).getTime() : 0;
-  const now = Date.now();
-  const fiveMin = 5 * 60 * 1000;
-  const online = last && (now - last) < fiveMin;
-
-  res.json({ login, online, lastLoginAt: user.lastLoginAt });
-});
-
-// посты пользователя (старый эндпоинт, для совместимости)
-app.get('/api/posts', (req, res) => {
-  const author = req.query.author;
-  const db = loadDb();
-  let posts = db.posts;
-  if (author) {
-    posts = posts.filter(p => p.author === author);
-  }
-  res.json(posts);
-});
-
-// создать пост
-app.post('/api/posts', (req, res) => {
-  const { author, text } = req.body;
-  if (!author || !text) {
-    return res.status(400).json({ error: 'author and text required' });
-  }
-  const db = loadDb();
-  const user = db.users.find(u => u.login === author);
-  if (!user) {
-    return res.status(400).json({ error: 'unknown author' });
-  }
-  const post = {
-    id: Date.now().toString(),
-    author,
-    text,
-    time: new Date().toISOString()
-  };
-  db.posts.push(post);
-  saveDb(db);
-  res.json({ ok: true, post });
-});
-
-// удалить пост по id (только автор)
-app.delete('/api/posts/:id', (req, res) => {
-  const id = req.params.id;
-  const author = req.query.author;
-
-  if (!id || !author) {
-    return res.status(400).json({ error: 'id and author required' });
-  }
-
-  const db = loadDb();
-  const idx = db.posts.findIndex(p => p.id === id);
-
-  if (idx === -1) {
-    return res.status(404).json({ error: 'post not found' });
-  }
-  if (db.posts[idx].author !== author) {
-    return res.status(403).json({ error: 'not your post' });
-  }
-
-  db.posts.splice(idx, 1);
-  saveDb(db);
-  res.json({ ok: true });
-});
-
-// общая лента (все посты)
-app.get('/api/feed', (req, res) => {
-  const db = loadDb();
-  const sorted = (db.posts || [])
-    .slice()
-    .sort((a, b) => new Date(b.time) - new Date(a.time));
-  res.json(sorted);
-});
-
-// друзья: получить список
-app.get('/api/friends', (req, res) => {
-  const userLogin = req.query.user;
-  if (!userLogin) {
-    return res.status(400).json({ error: 'user required' });
-  }
-  const db = loadDb();
-  const user = db.users.find(u => u.login === userLogin);
-  if (!user) {
-    return res.status(400).json({ error: 'unknown user' });
-  }
-  res.json(user.friends || []);
-});
-
-// друзья: добавить (двусторонняя дружба)
-app.post('/api/friends/add', (req, res) => {
-  const { user, friend } = req.body;
-  if (!user || !friend) {
-    return res.status(400).json({ error: 'user and friend required' });
-  }
-  if (user === friend) {
-    return res.status(400).json({ error: 'cannot add yourself' });
-  }
-
-  const db = loadDb();
-  const u = db.users.find(x => x.login === user);
-  const f = db.users.find(x => x.login === friend);
-  if (!u || !f) {
-    return res.status(400).json({ error: 'unknown user or friend' });
-  }
-
-  if (!Array.isArray(u.friends)) u.friends = [];
-  if (!Array.isArray(f.friends)) f.friends = [];
-
-  if (!u.friends.includes(friend)) u.friends.push(friend);
-  if (!f.friends.includes(user)) f.friends.push(user);
-
-  saveDb(db);
-  res.json({ ok: true, friends: u.friends });
-});
-
-// диалоги (список собеседников по сообщениям)
-app.get('/api/dialogs', (req, res) => {
-  const user = req.query.user;
-  if (!user) {
-    return res.status(400).json({ error: 'user required' });
-  }
-  const db = loadDb();
-  const partners = new Set();
-  db.messages.forEach(m => {
-    if (m.from === user) partners.add(m.to);
-    if (m.to === user) partners.add(m.from);
-  });
-  res.json(Array.from(partners));
-});
-
-// сообщения: получить историю между двумя
-app.get('/api/messages', (req, res) => {
-  const user = req.query.user;
-  const withUser = req.query.with;
-  if (!user || !withUser) {
-    return res.status(400).json({ error: 'user and with required' });
-  }
-  const db = loadDb();
-  const msgs = db.messages
-    .filter(m =>
-      (m.from === user && m.to === withUser) ||
-      (m.from === withUser && m.to === user)
-    )
-    .sort((a, b) => new Date(a.time) - new Date(b.time));
-  res.json(msgs);
-});
-
-// сообщения: отправить
-app.post('/api/messages', (req, res) => {
-  const { from, to, text } = req.body;
-  if (!from || !to || !text) {
-    return res.status(400).json({ error: 'from, to and text required' });
-  }
-  const db = loadDb();
-  const fromUser = db.users.find(u => u.login === from);
-  const toUser = db.users.find(u => u.login === to);
-  if (!fromUser || !toUser) {
-    return res.status(400).json({ error: 'unknown user' });
-  }
-  const msg = {
-    id: Date.now().toString(),
-    from,
-    to,
-    text,
-    time: new Date().toISOString()
-  };
-  db.messages.push(msg);
-  saveDb(db);
-  res.json({ ok: true, message: msg });
-});
-
-app.listen(PORT, () => {
-  console.log('Server running on port', PORT);
-});
+// онлайн-статус по last
