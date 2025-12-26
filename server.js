@@ -128,4 +128,30 @@ app.post('/api/avatar', (req, res) => {
   res.json({ ok: true });
 });
 
-// онлайн-статус по last
+// КОММЕНТАРИИ
+app.post('/api/comments/add', (req, res) => {
+  const db = loadDb();
+  const { postId, authorLogin, text } = req.body;
+  
+  if (!postId || !authorLogin || !text) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+  
+  if (!db.comments) db.comments = [];
+  const comment = { id: Date.now(), postId, authorLogin, text, timestamp: new Date().toISOString() };
+  db.comments.push(comment);
+  saveDb(db);
+  res.json(comment);
+});
+
+app.get('/api/comments/:postId', (req, res) => {
+  const db = loadDb();
+  const { postId } = req.params;
+  if (!db.comments) db.comments = [];
+  const postComments = db.comments.filter(c => c.postId == postId);
+  res.json(postComments);
+});
+
+app.listen(PORT, () => {
+  console.log(`atype backend running on port ${PORT}`);
+});
