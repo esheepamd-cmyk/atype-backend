@@ -131,6 +131,40 @@ app.post('/api/avatar', (req, res) => {
   res.json({ ok: true });
 });
 
+// ПОСТЫ
+app.post('/api/posts', (req, res) => {
+  const { author, text } = req.body;
+  if (!author || !text) {
+    return res.status(400).json({ error: 'author and text required' });
+  }
+
+  const db = loadDb();
+  const user = db.users.find(u => u.login === author);
+  if (!user) {
+    return res.status(400).json({ error: 'unknown author' });
+  }
+
+  const post = {
+    id: Date.now(),
+    author,
+    text,
+    createdAt: new Date().toISOString()
+  };
+
+  db.posts.push(post);
+  user.lastPostAt = post.createdAt;
+  saveDb(db);
+
+  res.json(post);
+});
+
+app.get('/api/feed', (req, res) => {
+  const db = loadDb();
+  const posts = Array.isArray(db.posts) ? db.posts : [];
+  posts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json(posts);
+});
+
 // КОММЕНТАРИИ
 app.post('/api/comments/add', (req, res) => {
   const db = loadDb();
