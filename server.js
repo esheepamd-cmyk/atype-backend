@@ -42,16 +42,6 @@ function loadDb() {
   }
 }
 
-
-    // гарантируем, что testa acc — админ
-    ensureAdmin(parsed);
-
-    return parsed;
-  } catch {
-    return { users: [], posts: [], messages: [] };
-  }
-}
-
 function saveDb(db) {
   fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), 'utf8');
 }
@@ -75,7 +65,6 @@ function isAdmin(db, login) {
   const u = db.users.find(x => x.login === login);
   return u && u.role === 'admin';
 }
-
 
 app.use(cors());
 app.use(express.json());
@@ -146,13 +135,19 @@ app.post('/api/avatar', (req, res) => {
 app.post('/api/comments/add', (req, res) => {
   const db = loadDb();
   const { postId, authorLogin, text } = req.body;
-  
+
   if (!postId || !authorLogin || !text) {
     return res.status(400).json({ error: 'Missing fields' });
   }
-  
+
   if (!db.comments) db.comments = [];
-  const comment = { id: Date.now(), postId, authorLogin, text, timestamp: new Date().toISOString() };
+  const comment = {
+    id: Date.now(),
+    postId,
+    authorLogin,
+    text,
+    timestamp: new Date().toISOString()
+  };
   db.comments.push(comment);
   saveDb(db);
   res.json(comment);
