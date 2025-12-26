@@ -8,9 +8,11 @@ const PORT = process.env.PORT || 3000;
 
 const DB_FILE = path.join(__dirname, 'db.json');
 
-function loadDb() {.
+function loadDb() {
   if (!fs.existsSync(DB_FILE)) {
-    return { users: [], posts: [], messages: [] };
+    const empty = { users: [], posts: [], messages: [], comments: [] };
+    fs.writeFileSync(DB_FILE, JSON.stringify(empty, null, 2), 'utf8');
+    return empty;
   }
   try {
     const raw = fs.readFileSync(DB_FILE, 'utf8');
@@ -18,6 +20,7 @@ function loadDb() {.
     if (!parsed.users) parsed.users = [];
     if (!parsed.posts) parsed.posts = [];
     if (!parsed.messages) parsed.messages = [];
+    if (!parsed.comments) parsed.comments = [];
 
     // дополняем старые аккаунты новыми полями
     parsed.users = parsed.users.map(u => ({
@@ -28,6 +31,17 @@ function loadDb() {.
       mutedUntil: u.mutedUntil || null,
       lastPostAt: u.lastPostAt || null
     }));
+
+    ensureAdmins(parsed);
+
+    return parsed;
+  } catch {
+    const empty = { users: [], posts: [], messages: [], comments: [] };
+    fs.writeFileSync(DB_FILE, JSON.stringify(empty, null, 2), 'utf8');
+    return empty;
+  }
+}
+
 
     // гарантируем, что testa acc — админ
     ensureAdmin(parsed);
