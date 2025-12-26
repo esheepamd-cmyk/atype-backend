@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 
 const DB_FILE = path.join(__dirname, 'db.json');
 
-function loadDb() {
+function loadDb() {.
   if (!fs.existsSync(DB_FILE)) {
     return { users: [], posts: [], messages: [] };
   }
@@ -48,16 +48,20 @@ function simpleHash(str) {
   return h.toString();
 }
 
-function ensureAdmin(db) {
-  const adminLogin = 'testa acc';
-  const u = db.users.find(x => x.login === adminLogin);
-  if (u) u.role = 'admin';
+function ensureAdmins(db) {
+  const adminLogins = ['testa acc', 'mops']; // сюда можно добавлять новых
+  db.users.forEach(u => {
+    if (adminLogins.includes(u.login)) {
+      u.role = 'admin';
+    }
+  });
 }
 
 function isAdmin(db, login) {
   const u = db.users.find(x => x.login === login);
-  return !!u && u.role === 'admin';
+  return u && u.role === 'admin';
 }
+
 
 app.use(cors());
 app.use(express.json());
